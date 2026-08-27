@@ -1,6 +1,7 @@
 import { mkdir, writeFile } from 'node:fs/promises';
 import { MARKET_UNIVERSE } from '../universe.js';
 import { fetchFundamentals, fetchOrganizationFlow } from './source-cafef.mjs';
+import { fetchVpsBaseInfo, fetchVpsEvents } from './source-vps.mjs';
 const OUT = new URL('../data/', import.meta.url);
 const CTX = new URL('../data/context/', import.meta.url);
 const NEWS = new URL('../data/news/', import.meta.url);
@@ -18,7 +19,7 @@ async function yahoo(symbol){
   for(const ps of candidates){
     try{
       const url=`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ps)}?range=1y&interval=1d&events=div%2Csplits&includePrePost=false`;
-      const r=await fetch(url,{headers:ua});
+      const r=await fetch(url,{headers:ua,signal:AbortSignal.timeout(8000)});
       if(!r.ok){lastError=`Yahoo HTTP ${r.status}`;continue}
       const j=await r.json(),x=j?.chart?.result?.[0];
       if(!x){lastError=j?.chart?.error?.description||'Yahoo không có dữ liệu';continue}
@@ -35,7 +36,7 @@ async function yahoo(symbol){
   }
   throw new Error(lastError);
 }
-async function fetchText(url){const r=await fetch(url,{headers:ua});if(!r.ok)throw new Error(`HTTP ${r.status}`);return r.text()}
+async function fetchText(url){const r=await fetch(url,{headers:ua,signal:AbortSignal.timeout(8000)});if(!r.ok)throw new Error(`HTTP ${r.status}`);return r.text()}
 async function pooled(items,limit,fn){let cursor=0;const workers=Array.from({length:Math.min(limit,items.length)},async()=>{while(cursor<items.length){const i=cursor++;await fn(items[i],i)}});await Promise.all(workers)}
 function decodeXml(s=''){return s.replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g,'$1').replace(/&amp;/g,'&').replace(/&quot;/g,'"').replace(/&#39;/g,"'").replace(/&lt;/g,'<').replace(/&gt;/g,'>')}
 function tag(block,name){const m=block.match(new RegExp(`<${name}(?:\\s[^>]*)?>([\\s\\S]*?)<\\/${name}>`,'i'));return m?decodeXml(m[1].trim()):''}
@@ -60,23 +61,29 @@ const marketChecks=[];
 await pooled(symbols,6,async s=>{let out;try{out=await yahoo(s);marketChecks.push({name:s,ok:out.price!=null,provider:'Yahoo Finance',providerSymbol:out.providerSymbol})}catch(e){out={symbol:s,provider:'Yahoo Finance',price:null,previousClose:null,changePct:null,volume:null,timestamp:null,points:[],error:String(e.message||e),generatedAt:now()};marketChecks.push({name:s,ok:false,error:String(e.message||e),provider:'Yahoo Finance'})}await writeFile(new URL(`${safe(s)}.json`,OUT),JSON.stringify(out))});
 const contextChecks=[];
 await pooled(stockSymbols,4,async s=>{
-  let fundamentals=null,organizationFlow=null,fundError=null,flowError=null;
-  try{fundamentals=await fetchFundamentals(s)}catch(e){fundError=String(e.message||e)}
+  let vpsBase=null,vpsEvents=null,cafefFundamentals=null,organizationFlow=null;
+  let vpsBaseError=null,vpsEventsError=null,cafefFundError=null,flowError=null;
+  try{vpsBase=await fetchVpsBaseInfo(s)}catch(e){vpsBaseError=String(e.message||e)}
+  try{vpsEvents=await fetchVpsEvents(s)}catch(e){vpsEventsError=String(e.message||e)}
+  try{cafefFundamentals=await fetchFundamentals(s)}catch(e){cafefFundError=String(e.message||e)}
   try{organizationFlow=await fetchOrganizationFlow(s)}catch(e){flowError=String(e.message||e)}
-  const fundOk=(fundamentals?.usable||0)>0;
-  const flowOk=organizationFlow?.results?.some(x=>x.ok)||false;
-  const data={fundamentals,organizationFlow};
-  const out={symbol:s,provider:'CafeF',data,errors:{fundamentals:fundError,organizationFlow:flowError},generatedAt:now()};
-  contextChecks.push({name:`context:${s}`,ok:fundOk||flowOk,fundOk,flowOk,provider:'CafeF',fundError,flowError});
+  const vpsOk=vpsBase?.data!=null;
+  const cafefFundOk=(cafefFundamentals?.usable||0)>0;
+  const fundOk=vpsOk||cafefFundOk;
+  const flowOk=Number.isFinite(organizationFlow?.score);
+  const eventsOk=vpsEvents?.data!=null;
+  const data={fundamentals:{vps:vpsBase,cafef:cafefFundamentals},organizationFlow,events:vpsEvents};
+  const out={symbol:s,provider:'Multi-source',data,errors:{vpsBase:vpsBaseError,vpsEvents:vpsEventsError,cafefFundamentals:cafefFundError,organizationFlow:flowError},generatedAt:now()};
+  contextChecks.push({name:`context:${s}`,ok:fundOk||flowOk||eventsOk,fundOk,flowOk,eventsOk,vpsOk,cafefFundOk,provider:'VPS+CafeF',vpsBaseError,vpsEventsError,cafefFundError,flowError});
   await writeFile(new URL(`${safe(s)}.json`,CTX),JSON.stringify(out));
 });
 const newsChecks=[];
 await pooled(stockSymbols,4,async s=>{let out;try{out=await newsFor(s);newsChecks.push({name:`news:${s}`,ok:out.items.length>0,count:out.items.length,provider:'Google News RSS'})}catch(e){out={symbol:s,provider:'Google News RSS',items:[],error:String(e.message||e),generatedAt:now()};newsChecks.push({name:`news:${s}`,ok:false,error:String(e.message||e),provider:'Google News RSS'})}await writeFile(new URL(`${safe(s)}.json`,NEWS),JSON.stringify(out))});
 const checks=[...marketChecks,...contextChecks,...newsChecks];
 const failedSymbols=marketChecks.filter(x=>!x.ok).map(x=>x.name),marketOk=marketChecks.filter(x=>x.ok).length;
-const fundOk=contextChecks.filter(x=>x.fundOk).length,flowOk=contextChecks.filter(x=>x.flowOk).length;
+const fundOk=contextChecks.filter(x=>x.fundOk).length,flowOk=contextChecks.filter(x=>x.flowOk).length,eventsOk=contextChecks.filter(x=>x.eventsOk).length;
 const newsOk=newsChecks.filter(x=>x.ok).length;
-await writeFile(new URL('intel.json',OUT),JSON.stringify({ok:true,provider:'Stock Radar Multi-source',summary:`Market ${marketOk}/${symbols.length} • Fundamentals ${fundOk}/${stockSymbols.length} • Flow ${flowOk}/${stockSymbols.length} • News ${newsOk}/${stockSymbols.length}`,generatedAt:now()}));
-await writeFile(new URL('provider.json',OUT),JSON.stringify({ok:true,providers:[{name:'Yahoo Finance',purpose:'Market price'},{name:'CafeF Financial API',purpose:'Fundamentals'},{name:'CafeF Organization Flow',purpose:'Smart Money raw'},{name:'Google News RSS',purpose:'News/Catalyst'}],generatedAt:now()}));
-await writeFile(new URL('health.json',OUT),JSON.stringify({ok:marketOk>=Math.max(8,Math.floor(symbols.length*.75)),marketOk,marketTotal:symbols.length,contextOk:contextChecks.filter(x=>x.ok).length,contextTotal:contextChecks.length,fundOk,fundTotal:stockSymbols.length,flowOk,flowTotal:stockSymbols.length,newsOk,newsTotal:newsChecks.length,checks,failedSymbols,generatedAt:now()}));
-console.log(`Generated ${symbols.length} market + ${stockSymbols.length} context + ${stockSymbols.length} news snapshots; fundamentals ${fundOk}/${stockSymbols.length}; flow ${flowOk}/${stockSymbols.length}`);
+await writeFile(new URL('intel.json',OUT),JSON.stringify({ok:true,provider:'Stock Radar Multi-source',summary:`Market ${marketOk}/${symbols.length} • Fundamentals ${fundOk}/${stockSymbols.length} • Smart Money ${flowOk}/${stockSymbols.length} • Events ${eventsOk}/${stockSymbols.length} • News ${newsOk}/${stockSymbols.length}`,generatedAt:now()}));
+await writeFile(new URL('provider.json',OUT),JSON.stringify({ok:true,providers:[{name:'Yahoo Finance',purpose:'Market price'},{name:'VPS Public Datafeed',purpose:'Fundamentals/ratios'},{name:'VPS Company Events',purpose:'Corporate events'},{name:'CafeF Organization Flow',purpose:'Smart Money'},{name:'Google News RSS',purpose:'News/Catalyst'}],generatedAt:now()}));
+await writeFile(new URL('health.json',OUT),JSON.stringify({ok:marketOk>=Math.max(8,Math.floor(symbols.length*.75)),marketOk,marketTotal:symbols.length,contextOk:contextChecks.filter(x=>x.ok).length,contextTotal:contextChecks.length,fundOk,fundTotal:stockSymbols.length,flowOk,flowTotal:stockSymbols.length,eventsOk,eventsTotal:stockSymbols.length,newsOk,newsTotal:newsChecks.length,checks,failedSymbols,generatedAt:now()}));
+console.log(`Generated ${symbols.length} market + ${stockSymbols.length} context + ${stockSymbols.length} news; fundamentals ${fundOk}/${stockSymbols.length}; smart-money ${flowOk}/${stockSymbols.length}; events ${eventsOk}/${stockSymbols.length}`);
