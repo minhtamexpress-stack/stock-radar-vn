@@ -48,10 +48,25 @@ export async function fetchFundamentals(symbol){
   return{symbol,provider:'CafeF Financial API',metrics,periods:{revenue:revenue.map(x=>x.period),profit:profit.map(x=>x.period),equity:equity.map(x=>x.period)},codes:{revenueCode,profitCode,equityCode},usable,generatedAt:now()};
 }
 function vnDate(){const p=new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Ho_Chi_Minh',year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(new Date());const x=Object.fromEntries(p.map(a=>[a.type,a.value]));return`${x.year}-${x.month}-${x.day}`}
+function oneFlowSummary(data=[]){
+  const rows=Array.isArray(data)?data.filter(x=>Number.isFinite(Number(x?.netVal))):[];
+  const last5=rows.slice(0,5),last15=rows.slice(0,15);
+  const summarize=a=>{const net=a.reduce((s,x)=>s+Number(x.netVal||0),0),gross=a.reduce((s,x)=>s+Math.abs(Number(x.buyVal||0))+Math.abs(Number(x.sellVal||0)),0),pos=a.filter(x=>Number(x.netVal)>0).length;return{netVal:net,grossVal:gross,positiveDays:pos,totalDays:a.length,netRatio:gross?net/gross:null}};
+  return{d5:summarize(last5),d15:summarize(last15)};
+}
+function combinedScore(summaries=[]){
+  const ratios=[],cons=[];
+  for(const s of summaries){for(const k of ['d5','d15']){const x=s?.[k];if(Number.isFinite(x?.netRatio)){ratios.push(k==='d5'?x.netRatio*1.5:x.netRatio);if(x.totalDays)cons.push((x.positiveDays/x.totalDays-.5)*2)}}}
+  if(!ratios.length)return null;
+  const ratio=ratios.reduce((a,b)=>a+b,0)/ratios.length,consistency=cons.length?cons.reduce((a,b)=>a+b,0)/cons.length:0;
+  return Math.max(0,Math.min(100,50+ratio*80+consistency*12));
+}
 export async function fetchOrganizationFlow(symbol){
   const d=vnDate();
   const urls=[0,1].map((type,i)=>`https://msh-appdata.cafef.vn/rest-api/api/v1/OverviewOrgnizaztion/${type}/${d}/${i?20:15}?symbol=${encodeURIComponent(symbol)}`);
   const results=[];
-  for(const url of urls){try{results.push({ok:true,url,data:await getJson(url)})}catch(e){results.push({ok:false,url,error:String(e.message||e)})}}
-  return{symbol,provider:'CafeF Organization Flow',results,generatedAt:now()};
+  for(const url of urls){try{const data=await getJson(url);results.push({ok:true,url,data,summary:oneFlowSummary(data)})}catch(e){results.push({ok:false,url,error:String(e.message||e)})}}
+  const summaries=results.filter(x=>x.ok).map(x=>x.summary),score=combinedScore(summaries);
+  const net5=summaries.reduce((a,x)=>a+(x?.d5?.netVal||0),0),net15=summaries.reduce((a,x)=>a+(x?.d15?.netVal||0),0);
+  return{symbol,provider:'CafeF Organization Flow',score,net5,net15,results,generatedAt:now()};
 }
