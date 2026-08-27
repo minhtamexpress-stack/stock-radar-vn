@@ -22,12 +22,20 @@ function metric(flat,patterns){
   for(const [k,v] of flat){if(patterns.some(p=>k.includes(p))){const n=num(v);if(n!=null)return n}}
   return null;
 }
+function findNested(obj,key,depth=0){
+  if(!obj||typeof obj!=='object'||depth>6)return null;
+  if(Object.prototype.hasOwnProperty.call(obj,key))return obj[key];
+  for(const v of Object.values(obj)){const x=findNested(v,key,depth+1);if(x!=null)return x}
+  return null;
+}
 
 export function extractFundamentalScore(context){
   if(!context||typeof context!=='object')return{score:null,reasons:[],metrics:{}};
-  const f=flatten(context),metrics={
+  const normalized=findNested(context,'fundamentalNormalized');
+  if(!normalized||normalized.fresh!==true)return{score:null,reasons:[],metrics:{},fresh:false};
+  const f=flatten(normalized.metrics||normalized),metrics={
     roe:metric(f,['roe','return_on_equity','returnonequity']),
-    pe:metric(f,['p/e','pe_ratio','peratio','price_earnings']),
+    pe:metric(f,['p/e','pe_ratio','peratio','price_earnings','pe']),
     eps:metric(f,['eps','earnings_per_share']),
     revenueGrowth:metric(f,['revenue_growth','revenuegrowth','sales_growth','doanhthu_tangtruong','growth_revenue']),
     profitGrowth:metric(f,['profit_growth','profitgrowth','earnings_growth','loinhuan_tangtruong','growth_profit'])
@@ -37,8 +45,10 @@ export function extractFundamentalScore(context){
   if(metrics.pe!=null){n++;s+=metrics.pe>0&&metrics.pe<=15?10:metrics.pe<=25?4:metrics.pe>=40?-12:-3;reasons.push(`P/E ${metrics.pe.toFixed(1)}x`)}
   if(metrics.revenueGrowth!=null){n++;s+=metrics.revenueGrowth>=15?12:metrics.revenueGrowth>0?5:-10;reasons.push(`Tăng trưởng DT ${metrics.revenueGrowth.toFixed(1)}%`)}
   if(metrics.profitGrowth!=null){n++;s+=metrics.profitGrowth>=15?15:metrics.profitGrowth>0?6:-12;reasons.push(`Tăng trưởng LN ${metrics.profitGrowth.toFixed(1)}%`)}
-  if(metrics.eps!=null){n++;reasons.push(`EPS ${metrics.eps.toFixed(0)}`);s+=metrics.eps>0?3:-8}
-  return{score:n?clamp(s):null,reasons,metrics};
+  if(metrics.eps!=null){n++;reasons.push(`EPS ${metrics.eps.toFixed(2)}`);s+=metrics.eps>0?3:-8}
+  if(normalized.latestQuarter?.label)reasons.push(`BCTC cập nhật ${normalized.latestQuarter.label}`);
+  else if(normalized.asOfYear)reasons.push(`Fundamentals as-of ${normalized.asOfYear}`);
+  return{score:n?clamp(s):null,reasons,metrics,fresh:true,provider:normalized.provider||null};
 }
 
 export function extractFlowScore(context){
