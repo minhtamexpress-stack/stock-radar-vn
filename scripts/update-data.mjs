@@ -55,7 +55,10 @@ const contextChecks=[];
 await pooled(stockSymbols,5,async s=>{let out;try{const data=await fetchJson(`https://vietstock.info/api/stocks/${encodeURIComponent(s)}`);out={symbol:s,provider:'Vietstock Public API',data,generatedAt:now()};contextChecks.push({name:`context:${s}`,ok:true,provider:'Vietstock Public API'})}catch(e){out={symbol:s,provider:'Vietstock Public API',data:null,error:String(e.message||e),generatedAt:now()};contextChecks.push({name:`context:${s}`,ok:false,error:String(e.message||e),provider:'Vietstock Public API'})}await writeFile(new URL(`${safe(s)}.json`,CTX),JSON.stringify(out))});
 const newsChecks=[];
 await pooled(stockSymbols,4,async s=>{let out;try{out=await newsFor(s);newsChecks.push({name:`news:${s}`,ok:out.items.length>0,count:out.items.length,provider:'Google News RSS'})}catch(e){out={symbol:s,provider:'Google News RSS',items:[],error:String(e.message||e),generatedAt:now()};newsChecks.push({name:`news:${s}`,ok:false,error:String(e.message||e),provider:'Google News RSS'})}await writeFile(new URL(`${safe(s)}.json`,NEWS),JSON.stringify(out))});
-async function saveRemote(url,name){try{const j=await fetchJson(url);await writeFile(new URL(name,OUT),JSON.stringify({...j,_snapshotAt:now()}));return {name,ok:true}}catch(e){await writeFile(new URL(name,OUT),JSON.stringify({ok:false,error:String(e.message||e),_snapshotAt:now()}));return {name,ok:false,error:String(e.message||e)}}
+async function saveRemote(url,name){
+  try{const j=await fetchJson(url);await writeFile(new URL(name,OUT),JSON.stringify({...j,_snapshotAt:now()}));return {name,ok:true}}
+  catch(e){await writeFile(new URL(name,OUT),JSON.stringify({ok:false,error:String(e.message||e),_snapshotAt:now()}));return {name,ok:false,error:String(e.message||e)}}
+}
 const external=[];external.push(await saveRemote('https://vietstock.info/api/intel/daily','intel.json'));external.push(await saveRemote('https://vietstock.info/health','provider.json'));
 const checks=[...marketChecks,...contextChecks,...newsChecks,...external];
 const failedSymbols=marketChecks.filter(x=>!x.ok).map(x=>x.name),marketOk=marketChecks.filter(x=>x.ok).length;
