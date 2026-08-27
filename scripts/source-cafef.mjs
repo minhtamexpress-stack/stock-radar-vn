@@ -1,7 +1,7 @@
 const HEADERS={'User-Agent':'Mozilla/5.0 StockRadarVN/1.4','Accept':'application/json,text/plain,*/*'};
 const now=()=>new Date().toISOString();
 const norm=s=>String(s??'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase();
-async function getJson(url){const r=await fetch(url,{headers:HEADERS});if(!r.ok)throw new Error(`CafeF HTTP ${r.status}`);const j=await r.json();if(j?.isSuccess===false)throw new Error(`CafeF API error`);return j}
+async function getJson(url){const r=await fetch(url,{headers:HEADERS,signal:AbortSignal.timeout(8000)});if(!r.ok)throw new Error(`CafeF HTTP ${r.status}`);const j=await r.json();if(j?.isSuccess===false)throw new Error(`CafeF API error`);return j}
 function templateMap(node,map=new Map()){
   if(Array.isArray(node)){for(const x of node)templateMap(x,map);return map}
   if(node&&typeof node==='object'){
@@ -34,10 +34,7 @@ function pickCode(report,patterns,fallback=[]){
 function series(report,code){if(!code)return[];return report.periods.map(p=>({period:p.time,value:p.values[code]??null})).filter(x=>x.value!=null)}
 function growth(a,b){return Number.isFinite(a)&&Number.isFinite(b)&&b!==0?((a/b)-1)*100:null}
 export async function fetchFundamentals(symbol){
-  const endpoints={
-    income:'https://apiweb.cafef.vn/api/v1/BCTC/GetReportDetail',
-    balance:'https://apiweb.cafef.vn/api/v2/BCTC/GetReportCDKT'
-  };
+  const endpoints={income:'https://apiweb.cafef.vn/api/v1/BCTC/GetReportDetail',balance:'https://apiweb.cafef.vn/api/v2/BCTC/GetReportCDKT'};
   const url=(base,reportType)=>`${base}?symbol=${encodeURIComponent(symbol)}&pageIndex=1&pageSize=4&reportType=${reportType}&TypeTime=NAM`;
   const [incomeJ,balanceJ]=await Promise.all([getJson(url(endpoints.income,'KQKD')),getJson(url(endpoints.balance,'ALL'))]);
   const income=normalizeReport(incomeJ),balance=normalizeReport(balanceJ);
@@ -46,14 +43,7 @@ export async function fetchFundamentals(symbol){
   const equityCode=pickCode(balance,['von chu so huu'],['400']);
   const revenue=series(income,revenueCode),profit=series(income,profitCode),equity=series(balance,equityCode);
   const revLast=revenue.at(-1)?.value??null,revPrev=revenue.at(-2)?.value??null,profitLast=profit.at(-1)?.value??null,profitPrev=profit.at(-2)?.value??null,equityLast=equity.at(-1)?.value??null;
-  const metrics={
-    revenue:revLast,
-    profitAfterTax:profitLast,
-    equity:equityLast,
-    revenueGrowth:growth(revLast,revPrev),
-    profitGrowth:growth(profitLast,profitPrev),
-    roe:Number.isFinite(profitLast)&&Number.isFinite(equityLast)&&equityLast!==0?profitLast/equityLast*100:null
-  };
+  const metrics={revenue:revLast,profitAfterTax:profitLast,equity:equityLast,revenueGrowth:growth(revLast,revPrev),profitGrowth:growth(profitLast,profitPrev),roe:Number.isFinite(profitLast)&&Number.isFinite(equityLast)&&equityLast!==0?profitLast/equityLast*100:null};
   const usable=Object.values(metrics).filter(Number.isFinite).length;
   return{symbol,provider:'CafeF Financial API',metrics,periods:{revenue:revenue.map(x=>x.period),profit:profit.map(x=>x.period),equity:equity.map(x=>x.period)},codes:{revenueCode,profitCode,equityCode},usable,generatedAt:now()};
 }
