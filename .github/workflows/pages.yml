@@ -49,7 +49,45 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     runs-on: ubuntu-latest
     needs: build
+    outputs:
+      page_url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
+  smoke:
+    name: Production smoke test
+    runs-on: ubuntu-latest
+    needs: deploy
+    steps:
+      - name: Verify live site and critical snapshots
+        env:
+          PAGE_URL: ${{ needs.deploy.outputs.page_url }}
+        run: |
+          set -euo pipefail
+          base="${PAGE_URL%/}"
+          for i in $(seq 1 12); do
+            if curl -fsS --max-time 20 "$base/" -o /tmp/index.html; then break; fi
+            sleep 5
+          done
+          grep -q "Stock Radar VN" /tmp/index.html
+          curl -fsS --retry 5 --retry-delay 3 --max-time 20 "$base/data/FPT.json" -o /tmp/fpt.json
+          curl -fsS --retry 5 --retry-delay 3 --max-time 20 "$base/data/_VNINDEX.json" -o /tmp/vnindex.json
+          curl -fsS --retry 5 --retry-delay 3 --max-time 20 "$base/data/etf-health.json" -o /tmp/etf-health.json
+          curl -fsS --retry 5 --retry-delay 3 --max-time 20 "$base/data/health.json" -o /tmp/health.json
+          python3 - <<'PY'
+          import json
+          def load(path):
+              with open(path, encoding='utf-8') as f:
+                  return json.load(f)
+          fpt=load('/tmp/fpt.json')
+          vni=load('/tmp/vnindex.json')
+          etf=load('/tmp/etf-health.json')
+          health=load('/tmp/health.json')
+          assert fpt.get('symbol')=='FPT' and isinstance(fpt.get('price'),(int,float)) and fpt['price']>0, fpt
+          assert vni.get('symbol')=='^VNINDEX' and isinstance(vni.get('price'),(int,float)) and vni['price']>0, vni
+          assert etf.get('ok') is True and etf.get('okCount',0)>=4, etf
+          assert health.get('ok') is True and health.get('marketOk',0)>=8, health
+          print('PRODUCTION_SMOKE_OK')
+          print(f"FPT={fpt['price']} VNINDEX={vni['price']} ETF={etf.get('okCount')}/{etf.get('total')} MARKET={health.get('marketOk')}/{health.get('marketTotal')}")
+          PY
