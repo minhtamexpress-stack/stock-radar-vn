@@ -29,8 +29,8 @@ export function extractFundamentalScore(context){
     roe:metric(f,['roe','return_on_equity','returnonequity']),
     pe:metric(f,['p/e','pe_ratio','peratio','price_earnings']),
     eps:metric(f,['eps','earnings_per_share']),
-    revenueGrowth:metric(f,['revenue_growth','sales_growth','doanhthu_tangtruong','growth_revenue']),
-    profitGrowth:metric(f,['profit_growth','earnings_growth','loinhuan_tangtruong','growth_profit'])
+    revenueGrowth:metric(f,['revenue_growth','revenuegrowth','sales_growth','doanhthu_tangtruong','growth_revenue']),
+    profitGrowth:metric(f,['profit_growth','profitgrowth','earnings_growth','loinhuan_tangtruong','growth_profit'])
   };
   let s=50,n=0;const reasons=[];
   if(metrics.roe!=null){n++;s+=metrics.roe>=20?18:metrics.roe>=15?12:metrics.roe>=10?5:-12;reasons.push(`ROE ${metrics.roe.toFixed(1)}%`)}
@@ -44,6 +44,15 @@ export function extractFundamentalScore(context){
 export function extractFlowScore(context){
   if(!context||typeof context!=='object')return{score:null,reasons:[]};
   const f=flatten(context);
+  const direct=metric(f,['organizationflow.score','smartmoney.score','smartmoneyscore']);
+  const net5=metric(f,['organizationflow.net5','smartmoney.net5']);
+  const net15=metric(f,['organizationflow.net15','smartmoney.net15']);
+  if(direct!=null){
+    const reasons=[`Organization Flow ${direct.toFixed(0)}/100`];
+    if(net5!=null)reasons.push(`Dòng tiền ròng 5 phiên ${net5>=0?'+':''}${(net5/1e9).toFixed(1)} tỷ`);
+    if(net15!=null)reasons.push(`Dòng tiền ròng 15 phiên ${net15>=0?'+':''}${(net15/1e9).toFixed(1)} tỷ`);
+    return{score:clamp(direct),reasons};
+  }
   const foreign=metric(f,['foreign_net','foreignnet','net_foreign','khoingoai_rong','foreign_net_value']);
   const prop=metric(f,['proprietary_net','proprietarynet','tudoanh_rong','net_proprietary']);
   let s=50,n=0;const reasons=[];
