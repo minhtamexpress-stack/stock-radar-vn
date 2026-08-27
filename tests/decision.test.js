@@ -42,6 +42,15 @@ test('fresh normalized fundamentals are scored',()=>{
   assert.ok(r.reasons.some(x=>x.includes('Q2/2026')));
 });
 
+test('derived valuation and ROE proxy are labeled safely',()=>{
+  const r=extractFundamentalScore({fundamentalNormalized:{fresh:true,latestQuarter:{label:'Q2/2026'},metrics:{pe:8.2,pb:1.35,eps:2.71,bvps:16.46,roe:null,roeProxy:16.46},derived:{pe:true,pb:true,roeProxy:true}}});
+  assert.ok(Number.isFinite(r.score));
+  assert.equal(r.metrics.roeIsProxy,true);
+  assert.ok(r.reasons.some(x=>x.includes('ROE proxy')));
+  assert.ok(r.reasons.some(x=>x.includes('P/B')));
+  assert.ok(r.reasons.some(x=>x.includes('chỉ số suy ra')));
+});
+
 test('normalized organization flow becomes Smart Money score',()=>{
   const r=extractFlowScore({organizationFlow:{score:64,net5:12000000000,net15:-3000000000}});
   assert.equal(r.score,64);
