@@ -27,6 +27,8 @@ jobs:
         run: node --test tests/*.test.js
       - name: Refresh market snapshots
         run: node scripts/update-data.mjs
+      - name: Enrich fresh fundamentals
+        run: node scripts/enrich-fundamentals.mjs
       - name: Configure Pages
         uses: actions/configure-pages@v5
         with:
