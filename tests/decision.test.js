@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {tradePlan,decisionLabel,riskQualityScore} from '../decision-core.js';
+import {tradePlan,decisionLabel,riskQualityScore,extractFundamentalScore,extractFlowScore} from '../decision-core.js';
 
 test('tradePlan builds buy zone stop and targets from ATR',()=>{
   const m={price:100,indicators:{atr14:4,sma20:98,sma50:94,high20:104,low20:90,volumeRatio20:1.1,ret20d:8}};
@@ -27,4 +27,23 @@ test('decisionLabel respects risk veto',()=>{
 test('riskQualityScore returns bounded score',()=>{
   const s=riskQualityScore({price:100,indicators:{atr14:2,sma50:90,sma200:80,ret20d:5}});
   assert.ok(s>=0&&s<=100);
+});
+
+test('stale raw fundamentals are never scored',()=>{
+  const r=extractFundamentalScore({fundamentalsRaw:{vps:{roe:25,pe:8,eps:5000,year:2021}}});
+  assert.equal(r.score,null);
+  assert.equal(r.fresh,false);
+});
+
+test('fresh normalized fundamentals are scored',()=>{
+  const r=extractFundamentalScore({fundamentalNormalized:{fresh:true,asOfYear:2026,latestQuarter:{label:'Q2/2026'},metrics:{roe:20,pe:12,eps:5}}});
+  assert.ok(Number.isFinite(r.score));
+  assert.equal(r.fresh,true);
+  assert.ok(r.reasons.some(x=>x.includes('Q2/2026')));
+});
+
+test('normalized organization flow becomes Smart Money score',()=>{
+  const r=extractFlowScore({organizationFlow:{score:64,net5:12000000000,net15:-3000000000}});
+  assert.equal(r.score,64);
+  assert.ok(r.reasons.some(x=>x.includes('5 phiên')));
 });
