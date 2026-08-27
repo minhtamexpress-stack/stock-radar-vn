@@ -1,0 +1,9 @@
+import test from 'node:test';import assert from 'node:assert/strict';import {indicators,provisionalScore,riskEngine,actionFrom,buildPositions,marketRegime} from '../core.js';
+const pts=Array.from({length:220},(_,i)=>({t:i,close:100+i*.2,high:101+i*.2,low:99+i*.2,volume:1000+(i%20)*50}));
+test('indicators complete with 220 sessions',()=>{const i=indicators(pts);assert.ok(i.sma200);assert.ok(i.rsi14!==null);assert.ok(i.atr14!==null)});
+test('provisional score renormalizes',()=>{const p=provisionalScore({technicals:80,fundamentals:70});assert.equal(p.confidence,55);assert.ok(p.score>=70&&p.score<=80);assert.ok(p.missing.includes('smartMoney'))});
+test('social capped +/-3',()=>assert.equal(provisionalScore({technicals:80,socialAdjustment:99}).score,provisionalScore({technicals:80,socialAdjustment:3}).score));
+test('risk veto invalidation',()=>{const r=riskEngine({price:90,invalidation:95,i:indicators(pts)});assert.equal(r.state,'EXIT_REVIEW_NOW');assert.ok(r.severity>=85)});
+test('priority buy requires confidence',()=>assert.notEqual(actionFrom(90,25,10,70),'PRIORITY_BUY'));
+test('portfolio average cost',()=>{const p=buildPositions([{symbol:'FPT',type:'STOCK',sector:'Công nghệ',price:100,quantity:10,fee:10},{symbol:'FPT',type:'STOCK',sector:'Công nghệ',price:120,quantity:10,fee:10}],{});assert.equal(p[0].qty,20);assert.equal(p[0].avgCost,111)});
+test('regime returns valid state',()=>{const idx={price:150,indicators:indicators(pts)};const u=Array.from({length:6},()=>({changePct:1,indicators:indicators(pts)}));assert.ok(['RISK_ON','NEUTRAL','RISK_OFF'].includes(marketRegime(idx,u).state))});
