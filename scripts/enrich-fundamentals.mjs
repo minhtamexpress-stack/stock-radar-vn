@@ -9,6 +9,7 @@ const safe=s=>s.replace(/[^A-Z0-9]/gi,'_');
 const now=()=>new Date().toISOString();
 async function readJson(url,fallback={}){try{return JSON.parse(await readFile(url,'utf8'))}catch{return fallback}}
 async function pooled(items,limit,fn){let cursor=0;await Promise.all(Array.from({length:Math.min(limit,items.length)},async()=>{while(cursor<items.length){const i=cursor++;await fn(items[i],i)}}))}
+const missing=v=>v==null||!Number.isFinite(Number(v));
 const checks=[];
 await pooled(symbols,3,async symbol=>{
   const file=new URL(`${safe(symbol)}.json`,CTX),marketFile=new URL(`${safe(symbol)}.json`,DATA);
@@ -18,9 +19,9 @@ await pooled(symbols,3,async symbol=>{
   try{page=await fetchCafeFFundamentals(symbol)}catch(e){error=String(e.message||e)}
   const base={...(page?.metrics||{})},price=Number(market?.price),priceK=Number.isFinite(price)?(price>1000?price/1000:price):null;
   const eps=Number(base.eps),bvps=Number(base.bvps);
-  if(!Number.isFinite(Number(base.pe))&&Number.isFinite(priceK)&&Number.isFinite(eps)&&eps>0)base.pe=priceK/eps;
-  if(!Number.isFinite(Number(base.pb))&&Number.isFinite(priceK)&&Number.isFinite(bvps)&&bvps>0)base.pb=priceK/bvps;
-  if(!Number.isFinite(Number(base.roe))&&Number.isFinite(eps)&&Number.isFinite(bvps)&&bvps>0)base.roeProxy=eps/bvps*100;
+  if(missing(base.pe)&&Number.isFinite(priceK)&&Number.isFinite(eps)&&eps>0)base.pe=priceK/eps;
+  if(missing(base.pb)&&Number.isFinite(priceK)&&Number.isFinite(bvps)&&bvps>0)base.pb=priceK/bvps;
+  if(missing(base.roe)&&Number.isFinite(eps)&&Number.isFinite(bvps)&&bvps>0)base.roeProxy=eps/bvps*100;
   const usable=Object.values(base).filter(Number.isFinite).length;
   const fresh=page?.fresh===true&&usable>=2;
   ctx.data.fundamentalsRaw??={};ctx.data.fundamentalsRaw.cafefPage=page;
@@ -30,7 +31,7 @@ await pooled(symbols,3,async symbol=>{
     latestQuarter:page.latestQuarter,
     latestAnnualYear:page.latestAnnualYear,
     metrics:base,
-    derived:{pe:page?.metrics?.pe==null&&base.pe!=null,pb:page?.metrics?.pb==null&&base.pb!=null,roeProxy:base.roeProxy!=null,priceBasis:price,priceUnit:'VND',perShareFundamentalUnit:'thousand VND'},
+    derived:{pe:missing(page?.metrics?.pe)&&base.pe!=null,pb:missing(page?.metrics?.pb)&&base.pb!=null,roeProxy:base.roeProxy!=null,priceBasis:price,priceUnit:'VND',perShareFundamentalUnit:'thousand VND'},
     provider:page.provider,
     sourceUrl:page.sourceUrl,
     generatedAt:page.generatedAt
