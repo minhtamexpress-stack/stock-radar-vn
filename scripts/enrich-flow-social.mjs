@@ -10,14 +10,14 @@ function flatten(o,p='',out=[]){if(o==null)return out;if(Array.isArray(o)){o.for
 function pick(flat,patterns,exclude=[]){for(const [k,v] of flat){if(exclude.some(x=>k.includes(x)))continue;if(patterns.some(x=>k.includes(x))){const n=Number(v);if(Number.isFinite(n))return{key:k,value:n}}}return null}
 function foreignFrom(raw,price){
   const f=flatten(raw);
-  const buyVal=pick(f,['foreignbuyvalue','foreign_buy_value','foreignbuyval','frbuyvalue','nnmua_gt','foreignbuyamt'],['room']);
-  const sellVal=pick(f,['foreignsellvalue','foreign_sell_value','foreignsellval','frsellvalue','nnban_gt','foreignsellamt'],['room']);
-  const buyVol=pick(f,['foreignbuyvolume','foreign_buy_volume','foreignbuyvol','frbuyvol','nnmua_kl','foreignbuyqty','foreignbuyquantity'],['room']);
-  const sellVol=pick(f,['foreignsellvolume','foreign_sell_volume','foreignsellvol','frsellvol','nnban_kl','foreignsellqty','foreignsellquantity'],['room']);
+  const buyVal=pick(f,['foreignbuyvalue','foreign_buy_value','foreignbuyval','frbuyvalue','nnmua_gt','foreignbuyamt','fbvalue'],['room']);
+  const sellVal=pick(f,['foreignsellvalue','foreign_sell_value','foreignsellval','frsellvalue','nnban_gt','foreignsellamt','fsvalue'],['room']);
+  const buyVol=pick(f,['foreignbuyvolume','foreign_buy_volume','foreignbuyvol','frbuyvol','nnmua_kl','foreignbuyqty','foreignbuyquantity','fbvol','fbvolume'],['room']);
+  const sellVol=pick(f,['foreignsellvolume','foreign_sell_volume','foreignsellvol','frsellvol','nnban_kl','foreignsellqty','foreignsellquantity','fsvol','fsvolume'],['room']);
   let b=buyVal?.value??null,s=sellVal?.value??null,estimated=false,unit='raw value';
   if((b==null||s==null)&&Number.isFinite(price)&&buyVol&&sellVol){b=buyVol.value*price;s=sellVol.value*price;estimated=true;unit='VND estimated from volume × price'}
   const net=Number.isFinite(b)&&Number.isFinite(s)?b-s:null,gross=Number.isFinite(b)&&Number.isFinite(s)?Math.abs(b)+Math.abs(s):null;
-  const ratio=gross?net/gross:null,score=ratio==null?null:Math.max(0,Math.min(100,50+ratio*60));
+  const ratio=gross?net/gross:null,score=ratio==null?50:Math.max(0,Math.min(100,50+ratio*60));
   return{buyValue:b,sellValue:s,netValue:net,buyVolume:buyVol?.value??null,sellVolume:sellVol?.value??null,netRatio:ratio,score,estimated,unit,keys:{buyVal:buyVal?.key,sellVal:sellVal?.key,buyVol:buyVol?.key,sellVol:sellVol?.key}};
 }
 const UA={'User-Agent':'Mozilla/5.0 StockRadarVN/1.6'};
@@ -40,7 +40,7 @@ await pooled(symbols,3,async symbol=>{
   let social=null,socialError=null;try{social=await publicSocial(symbol)}catch(e){socialError=String(e.message||e)}
   ctx.data.foreignFlow={provider:'VPS Realtime Board',sourceUrl:quote?.sourceUrl||null,...foreign,generatedAt:now()};ctx.data.publicSocial=social;ctx.errors.vpsForeignFlow=quoteError;ctx.errors.publicSocial=socialError;ctx.generatedAt=now();
   await writeFile(ctxFile,JSON.stringify(ctx));await writeFile(new URL(`${safe(symbol)}.json`,SOCIAL),JSON.stringify(social||{symbol,error:socialError,items:[],generatedAt:now()}));
-  checks.push({symbol,foreignOk:Number.isFinite(foreign?.netValue),foreignEstimated:foreign?.estimated??false,socialOk:(social?.items?.length??0)>0,socialCount:social?.items?.length??0,quoteError,socialError});
+  checks.push({symbol,foreignOk:Number.isFinite(foreign?.netValue),foreignEstimated:foreign?.estimated??false,socialOk:(social?.items?.length??0)>0,socialCount:social?.items?.length??0,quoteError,socialError,foreignKeys:foreign?.keys??null});
 });
 const healthFile=new URL('health.json',DATA),health=await readJson(healthFile,{});health.foreignOk=checks.filter(x=>x.foreignOk).length;health.foreignTotal=symbols.length;health.socialOk=checks.filter(x=>x.socialOk).length;health.socialTotal=symbols.length;health.foreignSocialChecks=checks;health.generatedAt=now();await writeFile(healthFile,JSON.stringify(health));
 console.log(`Foreign flow ${health.foreignOk}/${symbols.length}; public social ${health.socialOk}/${symbols.length}`);
