@@ -33,22 +33,33 @@ export function extractFundamentalScore(context){
   if(!context||typeof context!=='object')return{score:null,reasons:[],metrics:{}};
   const normalized=findNested(context,'fundamentalNormalized');
   if(!normalized||normalized.fresh!==true)return{score:null,reasons:[],metrics:{},fresh:false};
-  const f=flatten(normalized.metrics||normalized),metrics={
-    roe:metric(f,['roe','return_on_equity','returnonequity']),
-    pe:metric(f,['p/e','pe_ratio','peratio','price_earnings','pe']),
-    eps:metric(f,['eps','earnings_per_share']),
+  const raw=normalized.metrics||{};
+  const f=flatten(raw);
+  const reportedRoe=num(raw.roe)??metric(f,['return_on_equity','returnonequity']);
+  const roeProxy=num(raw.roeProxy);
+  const roe=reportedRoe??roeProxy;
+  const metrics={
+    roe,
+    roeProxy:reportedRoe==null?roeProxy:null,
+    roeIsProxy:reportedRoe==null&&roeProxy!=null,
+    pe:num(raw.pe)??metric(f,['p/e','pe_ratio','peratio','price_earnings']),
+    pb:num(raw.pb)??metric(f,['p/b','pb_ratio','pbratio','price_book']),
+    eps:num(raw.eps)??metric(f,['earnings_per_share']),
+    bvps:num(raw.bvps)??metric(f,['book_value_per_share']),
     revenueGrowth:metric(f,['revenue_growth','revenuegrowth','sales_growth','doanhthu_tangtruong','growth_revenue']),
     profitGrowth:metric(f,['profit_growth','profitgrowth','earnings_growth','loinhuan_tangtruong','growth_profit'])
   };
   let s=50,n=0;const reasons=[];
-  if(metrics.roe!=null){n++;s+=metrics.roe>=20?18:metrics.roe>=15?12:metrics.roe>=10?5:-12;reasons.push(`ROE ${metrics.roe.toFixed(1)}%`)}
+  if(metrics.roe!=null){n++;s+=metrics.roe>=20?18:metrics.roe>=15?12:metrics.roe>=10?5:-12;reasons.push(`${metrics.roeIsProxy?'ROE proxy':'ROE'} ${metrics.roe.toFixed(1)}%`)}
   if(metrics.pe!=null){n++;s+=metrics.pe>0&&metrics.pe<=15?10:metrics.pe<=25?4:metrics.pe>=40?-12:-3;reasons.push(`P/E ${metrics.pe.toFixed(1)}x`)}
+  if(metrics.pb!=null)reasons.push(`P/B ${metrics.pb.toFixed(1)}x`);
   if(metrics.revenueGrowth!=null){n++;s+=metrics.revenueGrowth>=15?12:metrics.revenueGrowth>0?5:-10;reasons.push(`Tăng trưởng DT ${metrics.revenueGrowth.toFixed(1)}%`)}
   if(metrics.profitGrowth!=null){n++;s+=metrics.profitGrowth>=15?15:metrics.profitGrowth>0?6:-12;reasons.push(`Tăng trưởng LN ${metrics.profitGrowth.toFixed(1)}%`)}
   if(metrics.eps!=null){n++;reasons.push(`EPS ${metrics.eps.toFixed(2)}`);s+=metrics.eps>0?3:-8}
   if(normalized.latestQuarter?.label)reasons.push(`BCTC cập nhật ${normalized.latestQuarter.label}`);
   else if(normalized.asOfYear)reasons.push(`Fundamentals as-of ${normalized.asOfYear}`);
-  return{score:n?clamp(s):null,reasons,metrics,fresh:true,provider:normalized.provider||null};
+  if(normalized.derived?.pe||normalized.derived?.pb||metrics.roeIsProxy)reasons.push('Định giá/ROE proxy là chỉ số suy ra từ giá + EPS/BVPS, không phải số báo cáo nguyên bản');
+  return{score:n?clamp(s):null,reasons,metrics,fresh:true,provider:normalized.provider||null,sourceUrl:normalized.sourceUrl||null};
 }
 
 export function extractFlowScore(context){
