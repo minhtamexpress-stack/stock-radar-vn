@@ -31,6 +31,8 @@ jobs:
         run: node scripts/update-data.mjs
       - name: Enrich fresh fundamentals
         run: node scripts/enrich-fundamentals.mjs
+      - name: Enrich event evidence fallback
+        run: node scripts/enrich-events.mjs
       - name: Refresh ETF snapshots
         run: node scripts/update-etf.mjs
       - name: Configure Pages
