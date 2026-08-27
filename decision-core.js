@@ -1,4 +1,4 @@
-const num=v=>Number.isFinite(Number(v))?Number(v):null;
+const num=v=>v==null||v===''?null:(Number.isFinite(Number(v))?Number(v):null);
 const clamp=(v,a=0,b=100)=>Math.max(a,Math.min(b,v));
 
 export function riskQualityScore(m){
