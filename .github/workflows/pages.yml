@@ -25,6 +25,8 @@ jobs:
           node-version: '22'
       - name: Test core engine
         run: node --test tests/*.test.js
+      - name: Validate browser modules
+        run: node --check app.js && node --check decision-core.js && node --check decision-ui.js && node --check etf-ui.js && node --check governance-ui.js && node --check freshness.js && node --check universe.js
       - name: Refresh market snapshots
         run: node scripts/update-data.mjs
       - name: Enrich fresh fundamentals
