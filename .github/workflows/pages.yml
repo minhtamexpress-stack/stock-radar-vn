@@ -26,9 +26,11 @@ jobs:
       - name: Test core engine
         run: node --test tests/*.test.js
       - name: Validate browser modules
-        run: node --check app.js && node --check decision-core.js && node --check decision-ui.js && node --check etf-ui.js && node --check governance-ui.js && node --check event-proxy-ui.js && node --check risk-policy-ui.js && node --check portfolio-trade-ui.js && node --check vi-ui.js && node --check freshness.js && node --check universe.js
+        run: node --check app.js && node --check decision-core.js && node --check decision-ui.js && node --check quick-decision-ui.js && node --check etf-ui.js && node --check governance-ui.js && node --check event-proxy-ui.js && node --check risk-policy-ui.js && node --check portfolio-trade-ui.js && node --check vi-ui.js && node --check freshness.js && node --check universe.js && node --check scripts/enrich-flow-social.mjs
       - name: Refresh market snapshots
         run: node scripts/update-data.mjs
+      - name: Enrich foreign flow and public social signals
+        run: node scripts/enrich-flow-social.mjs
       - name: Enrich fresh fundamentals
         run: node scripts/enrich-fundamentals.mjs
       - name: Enrich event evidence fallback
@@ -72,8 +74,9 @@ jobs:
           done
           grep -q "Stock Radar VN" /tmp/index.html
           grep -q "Bảng điều khiển" /tmp/index.html
-          grep -q "vi-ui.js" /tmp/index.html
+          grep -q "quick-decision-ui.js" /tmp/index.html
           curl -fsS --retry 5 --retry-delay 3 --max-time 20 "$base/data/FPT.json" -o /tmp/fpt.json
+          curl -fsS --retry 5 --retry-delay 3 --max-time 20 "$base/data/context/FPT.json" -o /tmp/fptctx.json
           curl -fsS --retry 5 --retry-delay 3 --max-time 20 "$base/data/_VNINDEX.json" -o /tmp/vnindex.json
           curl -fsS --retry 5 --retry-delay 3 --max-time 20 "$base/data/etf-health.json" -o /tmp/etf-health.json
           curl -fsS --retry 5 --retry-delay 3 --max-time 20 "$base/data/health.json" -o /tmp/health.json
@@ -82,14 +85,13 @@ jobs:
           def load(path):
               with open(path, encoding='utf-8') as f:
                   return json.load(f)
-          fpt=load('/tmp/fpt.json')
-          vni=load('/tmp/vnindex.json')
-          etf=load('/tmp/etf-health.json')
-          health=load('/tmp/health.json')
+          fpt=load('/tmp/fpt.json'); ctx=load('/tmp/fptctx.json'); vni=load('/tmp/vnindex.json'); etf=load('/tmp/etf-health.json'); health=load('/tmp/health.json')
           assert fpt.get('symbol')=='FPT' and isinstance(fpt.get('price'),(int,float)) and fpt['price']>0, fpt
           assert vni.get('symbol')=='^VNINDEX' and isinstance(vni.get('price'),(int,float)) and vni['price']>0, vni
           assert etf.get('ok') is True and etf.get('okCount',0)>=4, etf
           assert health.get('ok') is True and health.get('marketOk',0)>=8, health
-          print('PRODUCTION_SMOKE_OK_VI')
-          print(f"FPT={fpt['price']} VNINDEX={vni['price']} ETF={etf.get('okCount')}/{etf.get('total')} MARKET={health.get('marketOk')}/{health.get('marketTotal')}")
+          assert 'foreignFlow' in ctx.get('data',{}), ctx.get('data',{}).keys()
+          assert 'publicSocial' in ctx.get('data',{}), ctx.get('data',{}).keys()
+          print('PRODUCTION_SMOKE_OK_TOP10_FLOW_SOCIAL')
+          print(f"FPT={fpt['price']} VNINDEX={vni['price']} ETF={etf.get('okCount')}/{etf.get('total')} MARKET={health.get('marketOk')}/{health.get('marketTotal')} FOREIGN={health.get('foreignOk')}/{health.get('foreignTotal')} SOCIAL={health.get('socialOk')}/{health.get('socialTotal')}")
           PY
