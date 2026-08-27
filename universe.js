@@ -9,10 +9,18 @@ export const OPPORTUNITY_UNIVERSE=[
   ['PLX','Dầu khí'],['POW','Điện'],['PVD','Dầu khí'],['VJC','Hàng không']
 ].map(([symbol,sector])=>({symbol,type:'STOCK',sector,manual:{}}));
 
+export const ETF_UNIVERSE=[
+  ['E1VFVN30','VN30'],
+  ['FUEVFVND','VN Diamond'],
+  ['FUESSVFL','VNFIN Lead'],
+  ['FUESSV30','VN30'],
+  ['FUEMAV30','VN30']
+].map(([symbol,indexName])=>({symbol,type:'ETF',sector:'ETF',indexName,manual:{}}));
+
 const coreSectors={VNM:'Tiêu dùng',VIC:'Bất động sản',FPT:'Công nghệ',HPG:'Thép',MWG:'Bán lẻ',MBB:'Ngân hàng',TCB:'Ngân hàng',ACB:'Ngân hàng',CTG:'Ngân hàng',HDB:'Ngân hàng',GAS:'Dầu khí'};
 export const MARKET_UNIVERSE=[
   ...CORE_SYMBOLS.map(symbol=>({symbol,type:'STOCK',sector:coreSectors[symbol]||'Khác'})),
   ...OPPORTUNITY_UNIVERSE
 ];
 
-export const UNIVERSE_VERSION='2026-08-27-v1';
+export const UNIVERSE_VERSION='2026-08-27-v2';
