@@ -5,135 +5,15 @@ const OFFICIAL_RX=/(hose\.vn|hnx\.vn|ssc\.gov\.vn|ubcknn|vsd\.vn|vsdc|công bố
 const SEVERE_RX=/(khởi tố|truy tố|điều tra hình sự|đình chỉ giao dịch|hủy niêm yết|gian lận|phá sản|mất khả năng thanh toán)/i;
 const HIGH_RX=/(xử phạt|vi phạm|thanh tra|cảnh báo|nợ xấu tăng mạnh|lợi nhuận giảm mạnh|thua lỗ lớn|bán giải chấp)/i;
 const MEDIUM_RX=/(phát hành thêm|pha loãng|cổ đông lớn bán|lãnh đạo bán|trái phiếu đáo hạn|kiểm toán ngoại trừ)/i;
-
-function sourceKey(x={}){
-  return String(x.source||x.provider||x.domain||x.url||x.link||'unknown').trim().toLowerCase();
-}
-function isOfficial(x={}){
-  if(x.official===true||Number(x.tier)<=2)return true;
-  return OFFICIAL_RX.test(`${x.source||''} ${x.provider||''} ${x.url||x.link||''}`);
-}
-
-export function hotNewsRisk(items=[]){
-  const hits=[];
-  for(const x of items||[]){
-    const title=String(x?.title||x?.headline||x?.summary||'').trim();
-    if(!title)continue;
-    let severity=0;
-    if(SEVERE_RX.test(title))severity=92;
-    else if(HIGH_RX.test(title))severity=76;
-    else if(MEDIUM_RX.test(title))severity=58;
-    if(severity)hits.push({severity,title,source:sourceKey(x),official:isOfficial(x),url:x.url||x.link||''});
-  }
-  hits.sort((a,b)=>b.severity-a.severity);
-  const top=hits[0];
-  if(!top)return{severity:0,veto:false,confirmed:false,hits:[],reasons:[]};
-  const severe=hits.filter(x=>x.severity>=90);
-  const sources=new Set(severe.map(x=>x.source).filter(Boolean));
-  const confirmed=severe.some(x=>x.official)||sources.size>=2;
-  const veto=top.severity>=90&&confirmed;
-  const severity=veto?top.severity:(top.severity>=90?78:top.severity);
-  const reasons=[top.title];
-  if(top.severity>=90&&!confirmed)reasons.push('Tin nghiêm trọng nhưng chưa đủ xác nhận chéo để kích hoạt Risk Veto');
-  if(veto)reasons.push('Risk Veto: tin nghiêm trọng đã được nguồn chính thức hoặc nhiều nguồn độc lập xác nhận');
-  return{severity,veto,confirmed,hits,reasons};
-}
-
-export function positionSizeByRisk({portfolioValue,entryPrice,stopPrice,riskPct=0.8,maxPositionPct=15,lotSize=100}={}){
-  const pv=num(portfolioValue),entry=num(entryPrice),stop=num(stopPrice);
-  if(pv==null||pv<=0||entry==null||entry<=0||stop==null||stop>=entry)return{shares:0,capital:0,riskBudget:0,reason:'Thiếu dữ liệu hoặc stop không hợp lệ'};
-  const riskBudget=pv*(Math.max(0,riskPct)/100),perShare=entry-stop;
-  const rawByRisk=Math.floor(riskBudget/perShare),rawByCap=Math.floor((pv*(Math.max(0,maxPositionPct)/100))/entry);
-  const raw=Math.max(0,Math.min(rawByRisk,rawByCap)),lot=Math.max(1,Math.floor(lotSize||1));
-  const shares=Math.floor(raw/lot)*lot;
-  return{shares,capital:shares*entry,riskBudget,perShareRisk:perShare,reason:shares?'Theo risk budget và giới hạn tỷ trọng':'Quy mô vị thế quá nhỏ với mức stop hiện tại'};
-}
-
-export function newEntryDecision({rec,plan,newsItems=[],regime='NEUTRAL'}={}){
-  const news=hotNewsRisk(newsItems),opp=num(rec?.score),confidence=num(rec?.confidence)??0;
-  const risk=Math.max(num(rec?.riskSeverity)??50,news.severity||0);
-  if(news.veto||risk>=85)return{action:'TRÁNH MUA / RISK VETO',code:'AVOID_VETO',opportunity:opp,confidence,risk,reasons:[...(news.reasons||[]),...(rec?.rationale||[])]};
-  if(opp==null||confidence<40)return{action:'CHƯA ĐỦ DỮ LIỆU',code:'NO_DATA',opportunity:opp,confidence,risk,reasons:['Không đủ dữ liệu để ra quyết định có độ tin cậy cao']};
-  const zone=plan?.status==='IN_BUY_ZONE';
-  if(opp>=85&&confidence>=80&&risk<=25&&zone&&regime!=='RISK_OFF')return{action:'MUA NGAY',code:'BUY_NOW',opportunity:opp,confidence,risk,reasons:['Cơ hội rất cao, độ tin cậy cao, rủi ro thấp và giá đang ở vùng mua']};
-  if(opp>=78&&confidence>=70&&risk<=35&&zone&&regime!=='RISK_OFF')return{action:'MUA THĂM DÒ',code:'BUY_PROBE',opportunity:opp,confidence,risk,reasons:['Cơ hội tốt và giá đang trong vùng mua nhưng chưa đạt chuẩn MUA NGAY']};
-  if(opp>=75&&risk<=50)return{action:'CANH MUA',code:'WATCH_BUY',opportunity:opp,confidence,risk,reasons:[zone?'Có thể chờ thêm xác nhận':'Cổ phiếu tốt nhưng chưa ở vùng mua tối ưu']};
-  return{action:'QUAN SÁT / TRÁNH MUA',code:'WATCH_AVOID',opportunity:opp,confidence,risk,reasons:['Tín hiệu chưa đủ đồng thuận để giải ngân']};
-}
-
-function trendState(m={}){
-  const p=num(m.price),i=m.indicators||{},s20=num(i.sma20),s50=num(i.sma50),s200=num(i.sma200);
-  const up=p!=null&&(s50==null||p>=s50)&&(s20==null||p>=s20*0.985);
-  const strong=p!=null&&s20!=null&&s50!=null&&p>=s20&&s20>=s50&&(s200==null||s50>=s200*0.97);
-  return{up,strong,s20,s50,s200};
-}
-
-function exitLevels(position={},m={},plan={}){
-  const avg=num(position.avgCost),price=num(m.price),atr=num(m?.indicators?.atr14),s20=num(m?.indicators?.sma20),s50=num(m?.indicators?.sma50);
-  if(avg==null||avg<=0)return{protectiveStop:num(plan?.stop),sellLow:num(plan?.sellLow),sellHigh:num(plan?.sellHigh),riskUnit:null};
-  const riskUnit=Math.max(avg*0.05,(atr||0)*1.5,avg*0.03);
-  const baseT1=avg+2*riskUnit,baseT2=avg+3*riskUnit;
-  let sellLow=baseT1,sellHigh=baseT2;
-  if(price!=null&&atr!=null&&atr>0&&price>baseT1){sellLow=Math.max(baseT1,price+0.8*atr);sellHigh=Math.max(baseT2,price+2.2*atr)}
-  let stop=num(plan?.stop);
-  const technical=[stop,s50!=null&&atr!=null?s50-0.6*atr:null,s20!=null&&atr!=null?s20-1.2*atr:null].filter(Number.isFinite);
-  stop=technical.length?Math.max(...technical):avg-riskUnit;
-  const pnl=num(position.pnlPct);
-  if(price!=null&&atr!=null&&atr>0&&pnl!=null){
-    if(pnl>=15)stop=Math.max(stop,avg+0.5*riskUnit,price-2*atr);
-    else if(pnl>=8)stop=Math.max(stop,avg,price-2.2*atr);
-    else if(pnl>=4)stop=Math.max(stop,avg-0.3*riskUnit);
-  }
-  if(price!=null&&stop>=price)stop=price-(atr||price*0.02);
-  return{protectiveStop:Math.max(0,stop),sellLow,sellHigh,riskUnit};
-}
-
-export function holdingDecision({position,market,rec,plan,fundamentals,flow,newsItems=[],regime='NEUTRAL'}={}){
-  const news=hotNewsRisk(newsItems),opp=num(rec?.score)??50,confidence=num(rec?.confidence)??0;
-  let risk=Math.max(num(rec?.riskSeverity)??50,news.severity||0);
-  const fund=num(fundamentals?.score),flowScore=num(flow?.score),trend=trendState(market),levels=exitLevels(position,market,plan);
-  const pnl=num(position?.pnlPct),price=num(market?.price),rsi=num(market?.indicators?.rsi14);
-  const trendScore=trend.strong?90:trend.up?70:35;
-  const longTermScore=clamp(opp*0.45+(fund??55)*0.25+trendScore*0.15+(flowScore??50)*0.15);
-  if(regime==='RISK_OFF')risk=Math.max(risk,45);
-  if(price!=null&&levels.protectiveStop!=null&&price<=levels.protectiveStop)risk=Math.max(risk,88);
-
-  let code='HOLD',action='TIẾP TỤC NẮM GIỮ',timeHint='Theo dõi 20–60 phiên; tiếp tục giữ khi xu hướng và luận điểm còn nguyên.';
-  const reasons=[];
-  if(news.veto||risk>=85){
-    code='SELL_NOW';action='BÁN NGAY';timeHint='Ưu tiên xử lý ngay khi có thanh khoản; đây là cảnh báo bảo toàn vốn/lợi nhuận.';
-    reasons.push('Rủi ro đã chạm ngưỡng thoát vị thế');
-  }else if(risk>=70){
-    code='REDUCE';action='GIẢM TỶ TRỌNG';timeHint='Rà soát trong 1–3 phiên; không mua thêm cho tới khi rủi ro giảm.';
-    reasons.push('Rủi ro cao, nên giảm quy mô vị thế');
-  }else if(pnl!=null&&pnl>=15&&((rsi??0)>=76||(price!=null&&levels.sellLow!=null&&price>=levels.sellLow))){
-    code='TAKE_PROFIT';action='CHỐT LỜI THEO VÙNG';timeHint='Có thể chốt từng phần và dùng điểm bảo vệ lợi nhuận cho phần còn lại.';
-    reasons.push('Vị thế đã có lợi nhuận đáng kể hoặc tiến vào vùng chốt lời');
-  }else if(longTermScore>=78&&confidence>=70&&risk<=40&&trend.up){
-    code='HOLD_LONG';action='NẮM GIỮ LÂU DÀI';timeHint='Có thể giữ 3–12 tháng nếu cơ bản, dòng tiền và xu hướng tiếp tục được duy trì.';
-    reasons.push('Cơ hội dài hạn tốt, xu hướng còn tích cực và rủi ro đang thấp');
-  }else if(!trend.up&&pnl!=null&&pnl<0&&risk>=55){
-    code='REDUCE';action='GIẢM TỶ TRỌNG';timeHint='Rà soát trong 3–10 phiên; ưu tiên bảo toàn vốn nếu xu hướng không hồi phục.';
-    reasons.push('Xu hướng suy yếu trong khi vị thế đang lỗ');
-  }else if(opp>=72&&risk<=50){
-    code='HOLD';action='TIẾP TỤC NẮM GIỮ';timeHint='Theo dõi 20–60 phiên; nâng điểm bảo vệ khi lợi nhuận tăng.';
-    reasons.push('Cơ hội vẫn còn, chưa xuất hiện điều kiện buộc phải bán');
-  }else{
-    code='HOLD_REVIEW';action='GIỮ THẬN TRỌNG / RÀ SOÁT';timeHint='Theo dõi sát 5–20 phiên; không gia tăng nếu tín hiệu chưa cải thiện.';
-    reasons.push('Tín hiệu chưa đủ mạnh để giữ dài hạn nhưng chưa chạm ngưỡng bán ngay');
-  }
-
-  if(fund!=null)reasons.push(`Cơ bản ${Math.round(fund)}/100`);
-  if(flowScore!=null)reasons.push(`Dòng tiền tổ chức ${Math.round(flowScore)}/100`);
-  reasons.push(`Opportunity ${Math.round(opp)}/100 • Confidence ${Math.round(confidence)}% • Risk ${Math.round(risk)}/100`);
-  if(levels.protectiveStop!=null)reasons.push(`Điểm bảo vệ vốn/lời khoảng ${levels.protectiveStop.toFixed(2)}`);
-  reasons.push(...(news.reasons||[]));
-  return{
-    symbol:position?.symbol,
-    code,action,timeHint,
-    opportunity:Math.round(opp),confidence:Math.round(confidence),risk:Math.round(risk),longTermScore:Math.round(longTermScore),
-    sellLow:levels.sellLow,sellHigh:levels.sellHigh,protectiveStop:levels.protectiveStop,
-    pnlPct:pnl,avgCost:num(position?.avgCost),price,
-    reasons:[...new Set(reasons)].slice(0,10),news
-  };
-}
+function sourceKey(x={}){return String(x.source||x.provider||x.domain||x.url||x.link||'unknown').trim().toLowerCase()}
+function isOfficial(x={}){if(x.official===true||Number(x.tier)<=2)return true;return OFFICIAL_RX.test(`${x.source||''} ${x.provider||''} ${x.url||x.link||''}`)}
+export function hotNewsRisk(items=[]){const hits=[];for(const x of items||[]){const title=String(x?.title||x?.headline||x?.summary||'').trim();if(!title)continue;let severity=0;if(SEVERE_RX.test(title))severity=92;else if(HIGH_RX.test(title))severity=76;else if(MEDIUM_RX.test(title))severity=58;if(severity)hits.push({severity,title,source:sourceKey(x),official:isOfficial(x),url:x.url||x.link||''})}hits.sort((a,b)=>b.severity-a.severity);const top=hits[0];if(!top)return{severity:0,veto:false,confirmed:false,hits:[],reasons:[]};const severe=hits.filter(x=>x.severity>=90),sources=new Set(severe.map(x=>x.source).filter(Boolean)),confirmed=severe.some(x=>x.official)||sources.size>=2,veto=top.severity>=90&&confirmed,severity=veto?top.severity:(top.severity>=90?78:top.severity),reasons=[top.title];if(top.severity>=90&&!confirmed)reasons.push('Tin nghiêm trọng nhưng chưa đủ xác nhận chéo để kích hoạt Risk Veto');if(veto)reasons.push('Risk Veto: tin nghiêm trọng đã được nguồn chính thức hoặc nhiều nguồn độc lập xác nhận');return{severity,veto,confirmed,hits,reasons}}
+export function positionSizeByRisk({portfolioValue,entryPrice,stopPrice,riskPct=0.8,maxPositionPct=15,lotSize=100}={}){const pv=num(portfolioValue),entry=num(entryPrice),stop=num(stopPrice);if(pv==null||pv<=0||entry==null||entry<=0||stop==null||stop>=entry)return{shares:0,capital:0,riskBudget:0,reason:'Thiếu dữ liệu hoặc stop không hợp lệ'};const riskBudget=pv*(Math.max(0,riskPct)/100),perShare=entry-stop,rawByRisk=Math.floor(riskBudget/perShare),rawByCap=Math.floor((pv*(Math.max(0,maxPositionPct)/100))/entry),raw=Math.max(0,Math.min(rawByRisk,rawByCap)),lot=Math.max(1,Math.floor(lotSize||1)),shares=Math.floor(raw/lot)*lot;return{shares,capital:shares*entry,riskBudget,perShareRisk:perShare,reason:shares?'Theo risk budget và giới hạn tỷ trọng':'Quy mô vị thế quá nhỏ với mức stop hiện tại'}}
+export function newEntryDecision({rec,plan,newsItems=[],regime='NEUTRAL'}={}){const news=hotNewsRisk(newsItems),opp=num(rec?.score),confidence=num(rec?.confidence)??0,risk=Math.max(num(rec?.riskSeverity)??50,news.severity||0);if(news.veto||risk>=85)return{action:'TRÁNH MUA / RISK VETO',code:'AVOID_VETO',opportunity:opp,confidence,risk,reasons:[...(news.reasons||[]),...(rec?.rationale||[])]};if(opp==null||confidence<40)return{action:'CHƯA ĐỦ DỮ LIỆU',code:'NO_DATA',opportunity:opp,confidence,risk,reasons:['Không đủ dữ liệu để ra quyết định có độ tin cậy cao']};const zone=plan?.status==='IN_BUY_ZONE';if(opp>=85&&confidence>=80&&risk<=25&&zone&&regime!=='RISK_OFF')return{action:'MUA NGAY',code:'BUY_NOW',opportunity:opp,confidence,risk,reasons:['Cơ hội rất cao, độ tin cậy cao, rủi ro thấp và giá đang ở vùng mua']};if(opp>=78&&confidence>=70&&risk<=35&&zone&&regime!=='RISK_OFF')return{action:'MUA THĂM DÒ',code:'BUY_PROBE',opportunity:opp,confidence,risk,reasons:['Cơ hội tốt và giá đang trong vùng mua nhưng chưa đạt chuẩn MUA NGAY']};if(opp>=75&&risk<=50)return{action:'CANH MUA',code:'WATCH_BUY',opportunity:opp,confidence,risk,reasons:[zone?'Có thể chờ thêm xác nhận':'Cổ phiếu tốt nhưng chưa ở vùng mua tối ưu']};return{action:'QUAN SÁT / TRÁNH MUA',code:'WATCH_AVOID',opportunity:opp,confidence,risk,reasons:['Tín hiệu chưa đủ đồng thuận để giải ngân']}}
+function trendState(m={}){const p=num(m.price),i=m.indicators||{},s20=num(i.sma20),s50=num(i.sma50),s200=num(i.sma200),up=p!=null&&(s50==null||p>=s50)&&(s20==null||p>=s20*0.985),strong=p!=null&&s20!=null&&s50!=null&&p>=s20&&s20>=s50&&(s200==null||s50>=s200*0.97);return{up,strong,s20,s50,s200}}
+function exitLevels(position={},m={},plan={}){const avg=num(position.avgCost),price=num(m.price),atr=num(m?.indicators?.atr14),s20=num(m?.indicators?.sma20),s50=num(m?.indicators?.sma50);if(avg==null||avg<=0)return{protectiveStop:num(plan?.stop),sellLow:num(plan?.sellLow),sellHigh:num(plan?.sellHigh),riskUnit:null};const riskUnit=Math.max(avg*0.05,(atr||0)*1.5,avg*0.03),baseT1=avg+2*riskUnit,baseT2=avg+3*riskUnit;let sellLow=baseT1,sellHigh=baseT2;if(price!=null&&atr!=null&&atr>0&&price>baseT1){sellLow=Math.max(baseT1,price+0.8*atr);sellHigh=Math.max(baseT2,price+2.2*atr)}let stop=num(plan?.stop);const technical=[stop,s50!=null&&atr!=null?s50-0.6*atr:null,s20!=null&&atr!=null?s20-1.2*atr:null].filter(Number.isFinite);stop=technical.length?Math.max(...technical):avg-riskUnit;const pnl=num(position.pnlPct);if(price!=null&&atr!=null&&atr>0&&pnl!=null){if(pnl>=15)stop=Math.max(stop,avg+0.5*riskUnit,price-2*atr);else if(pnl>=8)stop=Math.max(stop,avg,price-2.2*atr);else if(pnl>=4)stop=Math.max(stop,avg-0.3*riskUnit)}if(price!=null&&stop>=price)stop=price-(atr||price*0.02);return{protectiveStop:Math.max(0,stop),sellLow,sellHigh,riskUnit}}
+function pctRank(value,values=[]){const a=values.filter(Number.isFinite).sort((x,y)=>x-y);if(!a.length||!Number.isFinite(value))return null;let le=0;for(const x of a)if(x<=value)le++;return le/a.length*100}
+function etfPlan(m={}){const p=num(m.price),i=m.indicators||{},atr=num(i.atr14),s20=num(i.sma20),s50=num(i.sma50),h20=num(i.high20),vr=num(i.volumeRatio20);if(p==null||atr==null||atr<=0)return{buyLow:null,buyHigh:null,stop:null,target1:null,target2:null,inZone:false,setup:'NO_LEVELS'};let buyLow,buyHigh,setup='PULLBACK';const breakout=h20!=null&&p>=h20*0.99&&(vr??0)>=1.15;if(breakout){buyLow=h20-0.25*atr;buyHigh=h20+0.75*atr;setup='BREAKOUT'}else{const anchor=s20??s50??p;buyLow=anchor-0.75*atr;buyHigh=anchor+0.35*atr}if(buyHigh<buyLow)[buyLow,buyHigh]=[buyHigh,buyLow];const stopCandidates=[buyLow-1.15*atr,s50!=null?s50-0.85*atr:null].filter(x=>Number.isFinite(x)&&x<p);let stop=stopCandidates.length?Math.max(...stopCandidates):p-2*atr;if(stop>=p)stop=p-1.5*atr;const mid=(buyLow+buyHigh)/2,risk=Math.max(atr,mid-stop),target1=mid+2*risk,target2=mid+3*risk;return{buyLow:Math.max(0,buyLow),buyHigh:Math.max(0,buyHigh),stop:Math.max(0,stop),target1,target2,inZone:p>=buyLow&&p<=buyHigh,setup}}
+export function etfDecision({market,indexMarket,peers=[],regime='NEUTRAL',heldPosition=null}={}){const p=num(market?.price),i=market?.indicators||{},idx=indexMarket?.indicators||{},plan=etfPlan(market),reasons=[];if(p==null)return{code:'NO_DATA',action:'CHƯA ĐỦ DỮ LIỆU',score:null,confidence:0,risk:70,relative20:null,peerRank:null,...plan,reasons:['Không có giá ETF hợp lệ']};const components=[];let trend=50,trendN=0;for(const ma of [num(i.sma20),num(i.sma50),num(i.sma200)])if(ma!=null){trend+=p>=ma?12:-12;trendN++}trend=clamp(trend);if(trendN)components.push(['trend',trend,40]);let momentum=null;const r20=num(i.ret20d),r60=num(i.ret60d),r5=num(i.ret5d);if(r20!=null||r60!=null){momentum=clamp(50+(r20??0)*2.0+(r60??0)*0.65);components.push(['momentum',momentum,25])}const idx20=num(idx.ret20d),relative20=r20!=null&&idx20!=null?r20-idx20:null;if(relative20!=null)components.push(['relative',clamp(50+relative20*4),20]);const peerReturns=(peers||[]).map(x=>num(x?.indicators?.ret20d)).filter(Number.isFinite),peerRank=pctRank(r20,peerReturns);if(peerRank!=null)components.push(['peer',peerRank,15]);const weight=components.reduce((a,x)=>a+x[2],0),score=weight?components.reduce((a,x)=>a+x[1]*x[2],0)/weight:null,confidence=Math.min(100,weight);let risk=15;if(num(i.sma20)!=null&&p<num(i.sma20))risk=Math.max(risk,32);if(num(i.sma50)!=null&&p<num(i.sma50))risk=Math.max(risk,56);if(num(i.sma200)!=null&&p<num(i.sma200))risk=Math.max(risk,72);if(r5!=null&&r5<=-5&&(num(i.volumeRatio20)??0)>=1.8)risk=Math.max(risk,76);if(num(i.rsi14)!=null&&i.rsi14>=82)risk=Math.max(risk,45);if(regime==='RISK_OFF')risk=Math.max(risk,52);const held=heldPosition&&num(heldPosition.qty)>0,pnl=num(heldPosition?.pnlPct);if(held&&plan.stop!=null&&p<=plan.stop)risk=Math.max(risk,88);let code='WATCH',action='THEO DÕI';if(held){if(risk>=85){code='SELL_NOW';action='BÁN NGAY'}else if(risk>=70){code='REDUCE';action='GIẢM TỶ TRỌNG'}else if(pnl!=null&&pnl>=12&&((num(i.rsi14)??0)>=76||(plan.target1!=null&&p>=plan.target1))){code='TAKE_PROFIT';action='CHỐT LỜI THEO VÙNG'}else if(score!=null&&score>=74&&risk<=45&&(num(i.sma50)==null||p>=i.sma50)){code='HOLD_LONG';action='NẮM GIỮ ETF LÕI'}else if(score!=null&&score>=60&&risk<65){code='HOLD';action='TIẾP TỤC NẮM GIỮ'}else{code='HOLD_REVIEW';action='GIỮ THẬN TRỌNG / RÀ SOÁT'}}else{if(risk>=70){code='AVOID';action='TRÁNH MUA'}else if(score!=null&&score>=82&&confidence>=70&&risk<=30&&plan.inZone&&regime!=='RISK_OFF'){code='BUY_NOW';action='MUA NGAY'}else if(score!=null&&score>=72&&confidence>=60&&risk<=45){code='WATCH_BUY';action=plan.inZone?'CÓ THỂ MUA THĂM DÒ':'CANH MUA'}else if(score!=null&&score>=60){code='WATCH';action='THEO DÕI / CHỜ ĐIỂM MUA'}else{code='NOT_PRIORITY';action='CHƯA ƯU TIÊN'}}if(score!=null)reasons.push(`ETF Score ${Math.round(score)}/100 • Data Confidence ${Math.round(confidence)}%`);if(relative20!=null)reasons.push(`Sức mạnh 20 phiên so VN-Index ${relative20>=0?'+':''}${relative20.toFixed(1)}%`);if(peerRank!=null)reasons.push(`Xếp hạng động lượng trong nhóm ETF: top ${(100-peerRank).toFixed(0)}%`);if(num(i.sma50)!=null)reasons.push(p>=i.sma50?'Giá đang trên SMA50':'Giá đã xuống dưới SMA50');if(regime==='RISK_OFF')reasons.push('Thị trường đang Risk Off: hạn chế giải ngân mới');if(!plan.inZone&&plan.buyLow!=null&&plan.buyHigh!=null&&code==='WATCH_BUY')reasons.push('ETF tốt nhưng giá chưa ở vùng mua tối ưu');return{code,action,score:score==null?null:Math.round(score),confidence:Math.round(confidence),risk:Math.round(risk),relative20,peerRank,...plan,reasons}}
+export function holdingDecision({position,market,rec,plan,fundamentals,flow,newsItems=[],regime='NEUTRAL',indexMarket=null,peers=[]}={}){if(String(position?.type||'').toUpperCase()==='ETF'){const ed=etfDecision({market,indexMarket,peers,regime,heldPosition:position}),levels=exitLevels(position,market,{stop:ed.stop}),reasons=[...ed.reasons];if(levels.protectiveStop!=null)reasons.push(`Điểm bảo vệ vốn/lời khoảng ${levels.protectiveStop.toFixed(2)}`);return{symbol:position?.symbol,code:ed.code,action:ed.action,timeHint:ed.code==='HOLD_LONG'?'Có thể giữ ETF lõi 3–12 tháng khi xu hướng trung hạn còn tích cực.':ed.code==='SELL_NOW'?'Ưu tiên xử lý ngay khi có thanh khoản để bảo toàn vốn/lợi nhuận.':ed.code==='REDUCE'?'Rà soát trong 1–3 phiên; không tăng tỷ trọng tới khi rủi ro giảm.':'Theo dõi 20–60 phiên; nâng điểm bảo vệ khi lợi nhuận tăng.',opportunity:ed.score??50,confidence:ed.confidence,risk:ed.risk,longTermScore:ed.score??50,sellLow:levels.sellLow??ed.target1,sellHigh:levels.sellHigh??ed.target2,protectiveStop:levels.protectiveStop??ed.stop,pnlPct:num(position?.pnlPct),avgCost:num(position?.avgCost),price:num(market?.price),reasons:[...new Set(reasons)].slice(0,10),news:{severity:0,veto:false,confirmed:false,hits:[],reasons:[]},etf:ed}}
+const news=hotNewsRisk(newsItems),opp=num(rec?.score)??50,confidence=num(rec?.confidence)??0;let risk=Math.max(num(rec?.riskSeverity)??50,news.severity||0);const fund=num(fundamentals?.score),flowScore=num(flow?.score),trend=trendState(market),levels=exitLevels(position,market,plan),pnl=num(position?.pnlPct),price=num(market?.price),rsi=num(market?.indicators?.rsi14),trendScore=trend.strong?90:trend.up?70:35,longTermScore=clamp(opp*0.45+(fund??55)*0.25+trendScore*0.15+(flowScore??50)*0.15);if(regime==='RISK_OFF')risk=Math.max(risk,45);if(price!=null&&levels.protectiveStop!=null&&price<=levels.protectiveStop)risk=Math.max(risk,88);let code='HOLD',action='TIẾP TỤC NẮM GIỮ',timeHint='Theo dõi 20–60 phiên; tiếp tục giữ khi xu hướng và luận điểm còn nguyên.';const reasons=[];if(news.veto||risk>=85){code='SELL_NOW';action='BÁN NGAY';timeHint='Ưu tiên xử lý ngay khi có thanh khoản; đây là cảnh báo bảo toàn vốn/lợi nhuận.';reasons.push('Rủi ro đã chạm ngưỡng thoát vị thế')}else if(risk>=70){code='REDUCE';action='GIẢM TỶ TRỌNG';timeHint='Rà soát trong 1–3 phiên; không mua thêm cho tới khi rủi ro giảm.';reasons.push('Rủi ro cao, nên giảm quy mô vị thế')}else if(pnl!=null&&pnl>=15&&((rsi??0)>=76||(price!=null&&levels.sellLow!=null&&price>=levels.sellLow))){code='TAKE_PROFIT';action='CHỐT LỜI THEO VÙNG';timeHint='Có thể chốt từng phần và dùng điểm bảo vệ lợi nhuận cho phần còn lại.';reasons.push('Vị thế đã có lợi nhuận đáng kể hoặc tiến vào vùng chốt lời')}else if(longTermScore>=78&&confidence>=70&&risk<=40&&trend.up&&fund!=null){code='HOLD_LONG';action='NẮM GIỮ LÂU DÀI';timeHint='Có thể giữ 3–12 tháng nếu cơ bản, dòng tiền và xu hướng tiếp tục được duy trì.';reasons.push('Cơ hội dài hạn tốt, xu hướng còn tích cực và rủi ro đang thấp')}else if(!trend.up&&pnl!=null&&pnl<0&&risk>=55){code='REDUCE';action='GIẢM TỶ TRỌNG';timeHint='Rà soát trong 3–10 phiên; ưu tiên bảo toàn vốn nếu xu hướng không hồi phục.';reasons.push('Xu hướng suy yếu trong khi vị thế đang lỗ')}else if(opp>=72&&risk<=50){code='HOLD';action='TIẾP TỤC NẮM GIỮ';timeHint='Theo dõi 20–60 phiên; nâng điểm bảo vệ khi lợi nhuận tăng.';reasons.push('Cơ hội vẫn còn, chưa xuất hiện điều kiện buộc phải bán')}else{code='HOLD_REVIEW';action='GIỮ THẬN TRỌNG / RÀ SOÁT';timeHint='Theo dõi sát 5–20 phiên; không gia tăng nếu tín hiệu chưa cải thiện.';reasons.push('Tín hiệu chưa đủ mạnh để giữ dài hạn nhưng chưa chạm ngưỡng bán ngay')}if(fund!=null)reasons.push(`Cơ bản ${Math.round(fund)}/100`);if(flowScore!=null)reasons.push(`Dòng tiền tổ chức ${Math.round(flowScore)}/100`);reasons.push(`Opportunity ${Math.round(opp)}/100 • Confidence ${Math.round(confidence)}% • Risk ${Math.round(risk)}/100`);if(levels.protectiveStop!=null)reasons.push(`Điểm bảo vệ vốn/lời khoảng ${levels.protectiveStop.toFixed(2)}`);reasons.push(...(news.reasons||[]));return{symbol:position?.symbol,code,action,timeHint,opportunity:Math.round(opp),confidence:Math.round(confidence),risk:Math.round(risk),longTermScore:Math.round(longTermScore),sellLow:levels.sellLow,sellHigh:levels.sellHigh,protectiveStop:levels.protectiveStop,pnlPct:pnl,avgCost:num(position?.avgCost),price,reasons:[...new Set(reasons)].slice(0,10),news}}
