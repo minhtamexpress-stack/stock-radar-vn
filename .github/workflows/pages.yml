@@ -26,7 +26,7 @@ jobs:
       - name: Test core engine
         run: node --test tests/*.test.js
       - name: Validate browser modules
-        run: node --check app.js && node --check decision-core.js && node --check decision-ui.js && node --check quick-decision-ui.js && node --check etf-ui.js && node --check governance-ui.js && node --check event-proxy-ui.js && node --check risk-policy-ui.js && node --check portfolio-trade-ui.js && node --check vi-ui.js && node --check freshness.js && node --check universe.js && node --check scripts/enrich-flow-social.mjs
+        run: node --check app.js && node --check decision-core.js && node --check decision-v2.js && node --check dynamic-market.js && node --check holding-advisor-ui.js && node --check decision-ui.js && node --check quick-decision-ui.js && node --check etf-ui.js && node --check governance-ui.js && node --check event-proxy-ui.js && node --check risk-policy-ui.js && node --check portfolio-trade-ui.js && node --check vi-ui.js && node --check freshness.js && node --check universe.js && node --check scripts/enrich-flow-social.mjs && node --check scripts/update-etf.mjs
       - name: Refresh market snapshots
         run: node scripts/update-data.mjs
       - name: Enrich foreign flow and public social signals
@@ -35,7 +35,7 @@ jobs:
         run: node scripts/enrich-fundamentals.mjs
       - name: Enrich event evidence fallback
         run: node scripts/enrich-events.mjs
-      - name: Refresh ETF snapshots
+      - name: Refresh all ETF snapshots
         run: node scripts/update-etf.mjs
       - name: Configure Pages
         uses: actions/configure-pages@v5
@@ -75,6 +75,7 @@ jobs:
           grep -q "Stock Radar VN" /tmp/index.html
           grep -q "Bảng điều khiển" /tmp/index.html
           grep -q "quick-decision-ui.js" /tmp/index.html
+          grep -q "holding-advisor-ui.js" /tmp/index.html
           curl -fsS --retry 5 --retry-delay 3 --max-time 20 "$base/data/FPT.json" -o /tmp/fpt.json
           curl -fsS --retry 5 --retry-delay 3 --max-time 20 "$base/data/context/FPT.json" -o /tmp/fptctx.json
           curl -fsS --retry 5 --retry-delay 3 --max-time 20 "$base/data/_VNINDEX.json" -o /tmp/vnindex.json
@@ -88,10 +89,10 @@ jobs:
           fpt=load('/tmp/fpt.json'); ctx=load('/tmp/fptctx.json'); vni=load('/tmp/vnindex.json'); etf=load('/tmp/etf-health.json'); health=load('/tmp/health.json')
           assert fpt.get('symbol')=='FPT' and isinstance(fpt.get('price'),(int,float)) and fpt['price']>0, fpt
           assert vni.get('symbol')=='^VNINDEX' and isinstance(vni.get('price'),(int,float)) and vni['price']>0, vni
-          assert etf.get('ok') is True and etf.get('okCount',0)>=4, etf
+          assert etf.get('total',0)>=20, etf
+          assert etf.get('ok') is True and etf.get('okCount',0)>=12, etf
           assert health.get('ok') is True and health.get('marketOk',0)>=8, health
           assert 'foreignFlow' in ctx.get('data',{}), ctx.get('data',{}).keys()
           assert 'publicSocial' in ctx.get('data',{}), ctx.get('data',{}).keys()
-          print('PRODUCTION_SMOKE_OK_TOP10_FLOW_SOCIAL')
-          print(f"FPT={fpt['price']} VNINDEX={vni['price']} ETF={etf.get('okCount')}/{etf.get('total')} MARKET={health.get('marketOk')}/{health.get('marketTotal')} FOREIGN={health.get('foreignOk')}/{health.get('foreignTotal')} SOCIAL={health.get('socialOk')}/{health.get('socialTotal')}")
+          print('PRODUCTION_SMOKE_OK_HOLDING_ALL_ETF_V3')
           PY
