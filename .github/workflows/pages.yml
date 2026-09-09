@@ -26,9 +26,11 @@ jobs:
       - name: Test core engine
         run: node --test tests/*.test.js
       - name: Validate browser modules
-        run: node --check app.js && node --check decision-core.js && node --check decision-v2.js && node --check dynamic-market.js && node --check holding-advisor-ui.js && node --check decision-ui.js && node --check quick-decision-ui.js && node --check etf-ui.js && node --check governance-ui.js && node --check event-proxy-ui.js && node --check risk-policy-ui.js && node --check portfolio-trade-ui.js && node --check vi-ui.js && node --check freshness.js && node --check universe.js && node --check scripts/enrich-flow-social.mjs && node --check scripts/update-etf.mjs
+        run: node --check app.js && node --check decision-core.js && node --check decision-v2.js && node --check dynamic-market.js && node --check holding-advisor-ui.js && node --check decision-ui.js && node --check quick-decision-ui.js && node --check etf-ui.js && node --check governance-ui.js && node --check event-proxy-ui.js && node --check risk-policy-ui.js && node --check portfolio-trade-ui.js && node --check vi-ui.js && node --check freshness.js && node --check universe.js && node --check scripts/enrich-flow-social.mjs && node --check scripts/update-etf.mjs && node --check scripts/ensure-vnindex-history.mjs
       - name: Refresh market snapshots
         run: node scripts/update-data.mjs
+      - name: Ensure VN-Index history
+        run: node scripts/ensure-vnindex-history.mjs
       - name: Enrich foreign flow and public social signals
         run: node scripts/enrich-flow-social.mjs
       - name: Enrich fresh fundamentals
@@ -89,10 +91,11 @@ jobs:
           fpt=load('/tmp/fpt.json'); ctx=load('/tmp/fptctx.json'); vni=load('/tmp/vnindex.json'); etf=load('/tmp/etf-health.json'); health=load('/tmp/health.json')
           assert fpt.get('symbol')=='FPT' and isinstance(fpt.get('price'),(int,float)) and fpt['price']>0, fpt
           assert vni.get('symbol')=='^VNINDEX' and isinstance(vni.get('price'),(int,float)) and vni['price']>0, vni
+          assert len(vni.get('points',[]))>=60, f"VNINDEX history too short: {len(vni.get('points',[]))}"
           assert etf.get('total',0)>=20, etf
           assert etf.get('ok') is True and etf.get('okCount',0)>=12, etf
           assert health.get('ok') is True and health.get('marketOk',0)>=8, health
           assert 'foreignFlow' in ctx.get('data',{}), ctx.get('data',{}).keys()
           assert 'publicSocial' in ctx.get('data',{}), ctx.get('data',{}).keys()
-          print('PRODUCTION_SMOKE_OK_HOLDING_ALL_ETF_V3')
+          print('PRODUCTION_SMOKE_OK_HOLDING_ALL_ETF_V3_VNINDEX_HISTORY')
           PY
